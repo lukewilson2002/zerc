@@ -34,6 +34,17 @@ pub fn main() !void {
         defer allocator.free(src_rel_path);
         defer allocator.free(out_rel_path);
 
+        if (entry.kind == .directory) {
+            std.debug.print("mkdir {s} -> {s}\n", .{ src_rel_path, out_rel_path });
+
+            out_dir.makeDir(entry.path) catch |err| {
+                if (err != error.PathAlreadyExists) {
+                    return err;
+                }
+            };
+            continue;
+        }
+
         const ext = std.fs.path.extension(entry.basename);
 
         if (std.mem.eql(u8, ext, ".md")) {
@@ -49,10 +60,7 @@ pub fn main() !void {
             defer allocator.free(contents);
 
             // Convert Markdown to HTML
-            var zmd = Zmd.init(allocator);
-            defer zmd.deinit();
-            try zmd.parse(contents);
-            const html = try zmd.toHtml(fragments);
+            const html = try renderMarkdown(allocator, contents);
             defer allocator.free(html);
 
             // Create / overwrite existing file with HTML
@@ -80,6 +88,13 @@ pub fn main() !void {
     // try stdout.print("Run `zig build test` to run the tests.\n", .{});
 
     // try bw.flush(); // don't forget to flush!
+}
+
+fn renderMarkdown(allocator: std.mem.Allocator, md: []const u8) ![]const u8 {
+    var zmd = Zmd.init(allocator);
+    defer zmd.deinit();
+    try zmd.parse(md);
+    return zmd.toHtml(fragments);
 }
 
 /// Replaces a filename's extension. new_ext can be ".html" for example.

@@ -1,12 +1,13 @@
 const std = @import("std");
-
 const Zmd = @import("zmd").Zmd;
-const fragments = @import("zmd").html.DefaultFragments;
+// const fragments = @import("zmd").html.DefaultFragments;
+const fragments = @import("html_fragments.zig").DefaultFragments;
+const default_style = @embedFile("style.css");
 
 pub fn main() !void {
     if (std.os.argv.len < 2) {
-        std.debug.print("error: you must provide a path to a root folder", .{});
-        std.process.exit(1);
+        std.debug.print("error: you must provide a path to a root folder\n", .{});
+        return error.InvalidArgs;
     }
 
     // using gpa for now, it detects data leaks and has already been helpful (but arenas don't require freeing?)
@@ -21,6 +22,18 @@ pub fn main() !void {
 
     // self explanatory
     const out_path = "build";
+
+    // Delete the build directory if it already exists, otherwise the user
+    // may have removed content and the build would still contain the removed content.
+    blk: {
+        const stat = std.fs.cwd().statFile(out_path) catch break :blk;
+        if (stat.kind != .directory) {
+            std.debug.print("cannot create build directory, a non-directory file already exists with that name\n", .{});
+            return error.CannotMakeBuildDir;
+        }
+        try std.fs.cwd().deleteTree(out_path);
+    }
+
     var out_dir = try std.fs.cwd().makeOpenPath(out_path, .{});
     defer out_dir.close();
 
@@ -78,6 +91,12 @@ pub fn main() !void {
         }
     }
 
+    // Write defaults to build folder (todo: user overwrites in conf)
+    std.debug.print("default style.css\n", .{});
+    const css_file = try out_dir.createFile("style.css", .{});
+    defer css_file.close();
+    try css_file.writeAll(default_style);
+
     // Leaving this here for when we need to use stdout and we can't remember how the fuck to do it
 
     // stdout is for the actual output of your application.
@@ -94,7 +113,23 @@ fn renderMarkdown(allocator: std.mem.Allocator, md: []const u8) ![]const u8 {
     var zmd = Zmd.init(allocator);
     defer zmd.deinit();
     try zmd.parse(md);
-    return zmd.toHtml(fragments);
+
+    const html = try zmd.toHtml(fragments);
+    defer allocator.free(html);
+
+    return try std.fmt.allocPrint(allocator,
+        \\<!DOCTYPE html>
+        \\<html>
+        \\<head>
+        \\<meta charset="UTF-8">
+        \\<link rel="stylesheet" href="/style.css">
+        \\</head>
+        \\<body>
+        \\<main>{s}</main>
+        \\</body>
+        \\</html>
+        \\
+    , .{html});
 }
 
 /// Replaces a filename's extension. new_ext can be ".html" for example.
